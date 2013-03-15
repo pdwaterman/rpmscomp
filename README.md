@@ -9,7 +9,7 @@ SYNOPSIS
 ========
 
     rpmscomp [OPTION]... [[USER]@HOST]... [FILE]...
-    rpmscomp --record [OPTION] [[USER]@HOST]...
+    rpmscomp --record [OPTION]... [[USER]@HOST]...
 
 
 DESCRIPTION
@@ -51,6 +51,48 @@ You can specify as many hosts and/or files as you want to compare (there is no h
 
 EXAMPLES
 ========
+
+    rpmscomp @server1
+
+This will ssh to server1, retrieve a list of all the RPMs installed on that host, then print out a comparison of the RPMs installed on server1 versus the local host.
+
+    rpmscomp @server1 @server2
+
+This will ssh to server1 and server2, retrieve a list of all the RPMs installed on each host, then print out a comparison of the RPMs installed on both hosts.
+
+    rpmscomp --diffonly @server1 @server2
+
+This will ssh to server1 and server2, retrieve a list of all the RPMs installed on each host, then print out a comparison of the RPMs installed on both hosts, but only
+showing RPMs where the installed version, release, or architecture(s) differ between the hosts.
+
+    rpmscomp user1@server1 user2@server2
+
+This will ssh to server1 as user1, ssh to server2 as user2, retrieve a list of all the RPMs installed on each host, then print out a comparison of the RPMs installed on both hosts.
+
+    rpmscomp @server1 @server2 @server3 @server4 @server5 @server6
+
+This will ssh to server1 through server6, retrieve a list of all the RPMs installed on each host, then print out a comparison of the RPMs installed on both hosts.
+
+    rpmscomp --record @server1 @server2
+
+This will ssh to server1 and server2, retrieve a list of all the RPMs installed on each host, and record that information in files (server1 for the server1 list and
+server2 for the server2 list). If the file that would be written to already exists, that host will be skipped.
+
+    rpmscomp --record --force @server1 @server2
+
+This will ssh to server1 and server2, retrieve a list of all the RPMs installed on each host, and record that information in files (server1 for the server1 list and
+server2 for the server2 list). If the file that would be written to already exists, it will be overwritten.
+
+    rpmscomp --record --output myprefix @server1 @server2
+
+This will ssh to server1 and server2, retrieve a list of all the RPMs installed on each host, and record that information in files (myprefix.server1 for the server1 list and
+server2 for the myprefix.server2 list). If the file that would be written to already exists, that host will be skipped.
+.
+    rpmscomp myprefix.server2 @server2
+    
+This will retrieve a previously stored list of RPMs installed from myprefix.server2, then ssh to server2, retrieve a list of all the RPMs installed on that host, then
+print out a comparison of the RPMs lisetd in myprefix.server2 versus those currently installed on server2.
+
 
 COPYRIGHT AND LICENSE
 =====================
