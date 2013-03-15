@@ -1,0 +1,487 @@
+#!/usr/bin/perl -w
+
+#------------------------------------------------------------------------------
+# rpmscomp - Compare RPM packages installed on multiple systems
+# Version 0.9.2 (2013-03-15)
+# Copyright (C) 2013, Paul Waterman
+#
+# This program is free software: you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by the Free
+# Software Foundation, either version 3 of the License, or (at your option)
+# any later version.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+# more details.
+#
+# You should have received a copy of the GNU General Public License along with
+# this program.  If not, see <http://www.gnu.org/licenses/>.
+
+use strict;
+use Getopt::Long;
+use Sys::Hostname;
+
+$| = 1;										# Force unbuffered STDOUT output
+
+my $dashes = "--------------------------------------------------------------------------------";
+my $mode = "text";
+my $opt_diffonly = "";
+my $opt_force = "";
+my $opt_help = "";
+my $opt_ignorearch = "";
+my $opt_output = "";
+my $opt_verbose = "";
+
+my @hosts;
+
+my %max_length;
+my %rpm_arches;
+my %rpm_qty;
+my %rpms;
+
+
+#------------------------------------------------------------------------------
+# count_unique(@list)
+#
+# Given a list of arguments, this function the number of unique values in the
+# list.
+
+sub count_unique {
+  my %value;
+  my $values = 0;
+  
+  foreach my $val (@_) {
+    if (!$value{$val}) {
+      $values++;
+      $value{$val} = "T";
+    }
+  }
+  
+  return($values);
+}
+
+
+#------------------------------------------------------------------------------
+# help()
+
+sub help {
+  print 'Usage: rpmcomp [OPTION]... [[USER]@HOST]... [FILE]...
+Compare the RPMs installed on the specified systems and/or recorded within the
+specified files.
+
+  -h, --help         Print this help message and exit
+
+  -d, --diffonly     Only list differences
+  -r, --record       Record mode (record installed RPMs for later)
+  -v, --verbose      Verbose mode
+
+Record mode options:
+
+  -f, --force        Force overwrite of output files
+  -o, --output       Write a list of installed RPMs to this file name. If
+                     multiple HOSTs are specified, this specifies a prefix,
+                     and the host name will be appended.
+
+If one or more [USER]@HOSTs are specified, rpmcomp will ssh to each of those
+hosts in order to determine what RPMs are installed on that system.
+
+If one of more FILEs are specified, rpmcomp will read a list of installed RPMs
+from those files as previously recorded by rpmcomp.
+
+If only one [USER]@HOST or FILE is specified and record mode is not specified,
+the RPMs installed on HOST will be compared with the RPMs installed on the
+local host.
+';
+}
+
+# Future options to add:
+#  
+#  ? - Identify a baseline (compare only vs. baseline)
+#  ? - Mark differences in bold
+#  -i, --ignorearch   Ignore architecture when comparing installed RPMs
+#
+#Output format options (mutually exclusive):
+#
+#  -c, --csv          Comma separated values
+#      --html         HTML mode
+#  -t, --text         Text mode (default)
+
+
+
+#------------------------------------------------------------------------------
+# max(@list)
+#
+# Given a list of arguments, this function returns whichever entry is
+# the greatest numerically.
+
+sub max {
+  return (sort {$a <=> $b} (@_))[-1];						# Sort the list numerically and return the last entry in the list
+}
+
+
+#------------------------------------------------------------------------------
+# min(@list)
+#
+# Given a list of arguments, this function returns whichever entry is
+# the least numerically.
+
+sub min {
+  return (sort {$a <=> $b} (@_))[0];						# Sort the list numerically and return the first entry in the list
+}
+
+
+#------------------------------------------------------------------------------
+# output_filename($host)
+#
+# Given a host designator in the form [USER]@HOST or @localhost, this function
+# will return the correct output filename for the host. This function takes
+# into account any specified --output filename, or in the case of multiple
+# hosts, assumes that any --output specified is a prefix.
+
+sub output_filename {
+  my $host = $_[0];
+  
+  if ($host =~ /\@(.+)$/) {
+    my $hostname = $1;
+    
+    if ($hostname eq "localhost") {
+      $hostname = hostname;
+    }
+    
+    if ($opt_output) {
+      if ($#hosts == 0) {
+        return $opt_output;
+      } else {
+        return $opt_output . $hostname;
+      }
+    } else {
+      return $hostname;
+    }    
+  } else {
+    print "ERROR: Unexpected host designator $host in output_filename().\n";
+    exit 1;
+  }
+}
+
+
+#------------------------------------------------------------------------------
+# print_comp()
+
+sub print_comp_alt {
+  foreach my $name (sort(keys(%rpms))) {
+    print "RPM: $name\n";
+    
+    foreach my $host (@hosts) {
+      print "    HOST $host\n";
+      
+      foreach my $verrel (sort(keys(%{$rpm_arches{$name}}))) {
+        if ($rpm_arches{$name}{$verrel}{$host}) {
+          print "        $verrel (" . $rpm_arches{$name}{$verrel}{$host} . ")\n";
+        }
+      }
+    }
+  }
+}
+
+sub print_comp {
+  my %formatstr;
+  my %hostlength;
+  
+  my $header1 = "";
+  my $header2 = "";
+  my $header3 = "";
+
+  if ($mode eq "csv") {
+    # PLACEHOLDER
+  } elsif ($mode eq "html") {
+    # PLACEHOLDER
+  } elsif ($mode eq "text") {
+    $header1 .= sprintf("%$max_length{'name'}s  ", "");
+    $header2 .= sprintf("%-$max_length{'name'}s  ", "Name");
+    $header3 .= sprintf("%0.$max_length{'name'}s  ", $dashes);
+  }
+  
+  foreach my $host (@hosts) {
+    $formatstr{$host} = "%-$max_length{$host}{'verrel'}s  %-$max_length{$host}{'arches'}s";
+    if ($host ne $hosts[$#hosts]) {
+      $formatstr{$host} .= "  ";
+    }
+    $hostlength{$host} = $max_length{$host}{'verrel'} + 2 + $max_length{$host}{'arches'};
+
+    $header1 .= "$host";
+    $header1 .= sprintf("%0." . ($hostlength{$host} - length($host)) . "s  ", $dashes);
+    
+    $header2 .= sprintf("%-$max_length{$host}{'verrel'}s  ", "Ver-Rel");
+    $header2 .= sprintf("%-$max_length{$host}{'arches'}s  ", "Arches");
+
+    $header3 .= sprintf("%0.$max_length{$host}{'verrel'}s  ", $dashes);
+    $header3 .= sprintf("%0.$max_length{$host}{'arches'}s  ", $dashes);
+  }
+
+  print "$header1\n";
+  print "$header2\n";
+  print "$header3\n";
+  
+  foreach my $name (sort(keys(%rpms))) {
+    if ($opt_diffonly) {
+      my @installed;
+      
+      foreach my $host (@hosts) {
+        my $all = "";
+        foreach my $verrel (keys(%{$rpm_arches{$host}{$name}})) {
+          $all .= "VER[$verrel]ARCHES[$rpm_arches{$host}{$name}{$verrel}]";
+        }
+        push (@installed, $all);
+      }
+
+      next if (&count_unique(@installed) == 1);
+    }  
+    
+    if (&max(values(%{$rpm_qty{$name}})) > 1) {					# If multiple ver-rel's of the RPM are installed on at least one host...
+      foreach my $verrel (sort(keys(%{$rpms{$name}}))) {			# ... we're going to go through each ver-rel of this RPM installed on hosts
+        if ($opt_diffonly) {
+          my @installed;
+          foreach my $host (@hosts) {
+            push(@installed, $rpm_arches{$host}{$name}{$verrel} || "UNINSTALLED");
+          }
+          next if (&count_unique(@installed) == 1);
+        }
+    
+        printf("%-$max_length{'name'}s  ", $name);
+        
+        foreach my $host (@hosts) {
+          if ($rpm_arches{$host}{$name}{$verrel}) {
+            printf($formatstr{$host}, $verrel, $rpm_arches{$host}{$name}{$verrel});
+          } else {
+            printf($formatstr{$host}, "-", "-");
+          }
+        }
+        
+        print "\n";
+      }
+    } else {									# Otherwise (only one ver-rel of the RPM is installed on each host)...
+      printf("%-$max_length{'name'}s  ", $name);				# ... first spit out the RPM name
+      foreach my $host (@hosts) {						# Next we're going to go through for each host
+        my $verrel = (keys(%{$rpm_arches{$host}{$name}}))[0] || "";
+        if ($rpm_arches{$host}{$name}{$verrel}) {
+          printf($formatstr{$host}, $verrel, $rpm_arches{$host}{$name}{$verrel});
+        } else {
+          printf($formatstr{$host}, "-", "-");
+        }
+      }
+      print "\n";
+
+    }
+  }
+}
+
+
+#------------------------------------------------------------------------------
+# process_command_line()
+
+sub process_command_line {
+  my $tmp_csv;
+  my $tmp_html;
+  my $tmp_record;
+  my $tmp_text;  
+
+  GetOptions (
+    'csv'        => \$tmp_csv,
+    'diffonly'   => \$opt_diffonly,
+    'force'      => \$opt_force,
+    'help'       => \$opt_help,
+    'html'       => \$tmp_html,
+    'ignorearch' => \$opt_ignorearch,
+    'output=s'   => \$opt_output,
+    'record'     => \$tmp_record,
+    'text'       => \$tmp_text,
+    'verbose'    => \$opt_verbose
+  );
+
+  if ($opt_help) {								# If the -h/--help option was specified...
+    &help;									# ... print out help information
+    exit 0;									# and exit
+  }
+  
+  # This next sectino of code counts the number of different modes that have
+  # been specified. If more than one mode has been specified,
+
+  my $modes = 0;
+  $mode++ if ($tmp_csv);
+  $mode++ if ($tmp_html);
+  $mode++ if ($tmp_record);
+  $mode++ if ($tmp_text);
+  
+  if ($modes > 1) {								# If more than one mode has been specified, we have a problem...
+    print "ERROR: Mutually exclusive modes specified.\n";
+    print "       Specify only one of --csv, --html, --text, or --record.\n";
+    exit 1;									# Exit with non-zero exit status (failure)
+  }
+  
+  $mode = "csv" if ($tmp_csv);
+  $mode = "html" if ($tmp_html);
+  $mode = "record" if ($tmp_record);
+  $mode = "text" if ($tmp_text);
+
+  foreach my $host (@ARGV) {
+    if ($host =~ /^.*\@.+$/) {							# If [USER]@HOST ...
+      push(@hosts, $host);							# ... add to @host list
+    } elsif ($mode eq "record") {						# Otherwise, this is a file. If we're in record mode...
+      print "ERROR: In record mode; only specify [USER]\@HOST entries.\n";	# ... print an error message
+      exit 1;									# and exit with a non-zero exit status (failure)
+    } elsif (-e $host) {							# Otherwise (non-record mode) if the file exists...
+      push(@hosts, $host);							# ... add to @host list
+    } else {									# Otherwise (the file doesn't exist) ...
+      print "ERROR: $host file does not exist.\n";				# ... print an error message
+      exit 1;									# and exit with a non-zero exit status (failure)
+    }
+  }
+
+  # TODO: NEED TO LOOK FOR DUPLICATE HOSTS
+
+  if ($mode eq "record") {							# If in record mode ...
+    if (!@hosts) {								# If no hosts were specified ...
+      push(@hosts, "\@localhost");						# ... add @localhost to the host list
+    }
+  } else {									# Otherwise (if not in record mode)...
+    if (!@hosts) {								# If no hosts were specified ...
+      print "ERROR: No hosts specified.\n";					# ... print an error message
+      exit 1;									# and exit with a non-zero exit status (failure)
+    }
+
+    if ($opt_output) {								# If --output [name] was specified ...
+      print "ERROR: --output can only be specified in --record mode.\n";	# ... print an error message
+      exit 1;									# and exit with a non-zero exit status (failure)
+    }
+    
+    if ($#hosts == 0) {								# If only one host was specified ...
+      push(@hosts, "\@localhost");						# ... add @localhost to the list
+    }
+  }
+}
+
+
+#------------------------------------------------------------------------------
+# read_installed_rpms()
+#
+# This function will traverse through the list of hosts and read in the
+# installed RPMs for each of those hosts. For localhost, it will execute the
+# rpm command to find insalled RPMs. For [USER]@HOST  entries, it will ssh to
+# the remote host and execute the rpm command to find installed RPMs. For file
+# entries, it will open and read the list of installed RPMs from the file.
+
+sub read_installed_rpms {
+  HOST: foreach my $host (@hosts) {						# Traverse through the list of hosts
+    &verbose("Reading installed RPMs for $host");
+
+    # This next section of code opens the RPM file handle for reading.
+    # Depending on the host specifier, the RPM file handle will read
+    # from the rpm command executed on the local system, or the rpm
+    # command executed on a remote host via ssh, or from a file where
+    # the results of the rpm command have previously been stored.    
+
+    if ($host eq "\@localhost") {
+      open(RPM, "rpm -q -a --queryformat '%{NAME}\t%{VERSION}\t%{RELEASE}\t%{ARCH}\n' |");
+    } elsif ($host =~ /^\@(.+)$/) {
+      open(RPM, "ssh $1 rpm -q -a --queryformat \"'%{NAME}\t%{VERSION}\t%{RELEASE}\t%{ARCH}\n'\" |");
+    } elsif ($host =~ /^.+\@.+$/) {
+      open(RPM, "ssh $host rpm -q -a --queryformat \"'%{NAME}\t%{VERSION}\t%{RELEASE}\t%{ARCH}\n'\" |");
+    } else {
+      open(RPM, $host);
+    }
+
+    if ($mode eq "record") {							# If we're in record mode...
+
+      my $filename = &output_filename($host);					# Determine what filename we should output to for this host
+
+      if (($opt_force) || (!-e $filename)) {					# If we're in --force mode or if the filename doesn't exist...
+        &verbose("Will write data for $host to $filename\n");
+        open(OUTPUT, "> $filename");						# Open $filename for writing
+      } else {									# If we're not in --force mode and the filename exists...
+        print STDERR "WARNING: Skipping $host; $filename exists.\n";		# ... spit out a warning message
+        next HOST;								# and move on to the next host
+      }
+      
+      while (<RPM>) {								# For each line read from the rpm command
+        if (/^(.+)\t(.+)\t(.+)\t(.+)\n$/) {					# If the output matches out expectations (four tab-delimited fields)...
+          print OUTPUT $_;							# ... print that to our open output file
+        }
+      }
+      
+      close(OUTPUT);								# Close the output file
+
+    } else {									# Otherwise (if we're NOT in record mode)...
+    
+      my %tmp_arches;
+
+      while(<RPM>) {								# For each line read in from the rpm command or input file...
+        if (/^(.+)\t(.+)\t(.+)\t(.+)\n$/) {					# If the output matches out expectations (four tab-delimited fields)...
+          my $name = $1;
+          my $ver = $2;
+          my $rel = $3;
+          my $arch = $4;
+          my $verrel = "$ver-$rel";
+          
+          $tmp_arches{$name}{$verrel}{$arch} = "T";
+          $rpms{$name}{$verrel} = "T";
+        }
+      }
+      
+      foreach my $name (keys(%tmp_arches)) {
+        $max_length{"name"} = &max(($max_length{"name"} || 4), length($name));
+
+        foreach my $verrel (keys(%{$tmp_arches{$name}})) {
+          $rpm_qty{$name}{$host}++;
+          $rpm_arches{$host}{$name}{$verrel} = join(", ", sort(keys(%{$tmp_arches{$name}{$verrel}})));
+          $max_length{$host}{"arches"} = &max(($max_length{$host}{"arches"} || 6), length($rpm_arches{$host}{$name}{$verrel}));
+          $max_length{$host}{"verrel"} = &max(($max_length{$host}{"verrel"} || 7), length($verrel));
+        }
+      }      
+
+    }
+    
+    close(RPM);
+  }
+    
+  foreach my $host (@hosts) {
+    foreach my $name (keys(%rpms)) {
+      if (!$rpm_qty{$name}{$host}) {
+        $rpm_qty{$name}{$host} = 0;
+      }
+    }
+  }
+}
+
+
+#------------------------------------------------------------------------------
+# verbose($text)
+
+sub verbose {
+  if ($opt_verbose) {								# If the verbose option is turned on...
+    print STDERR $_[0];								# ... print the first argument of this function to STDERR
+    if ($_[0] !~ /\n$/s) {							# If the first argument doesn't end in a newline...
+      print STDERR "\n";							# ... print a newline to STDERR
+    }
+  }
+}
+
+
+#------------------------------------------------------------------------------
+# MAIN
+
+&process_command_line;
+
+&read_installed_rpms;
+
+if ($mode ne "record") {
+  &print_comp;
+}
+
+#print "Max name length: $max_length{'name'}\n";
+#foreach my $host (@hosts) {
+#  print "Host $host:\n";
+#  print "  Max arch length = $max_length{$host}{'arch'}\n";
+#  print "  Max version length = $max_length{$host}{'version'}\n";
+#  print "  Max release length = $max_length{$host}{'release'}\n";
+#}
