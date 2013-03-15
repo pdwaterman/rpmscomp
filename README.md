@@ -22,18 +22,18 @@ General Options
 ---------------
 
 <table>
-<tr><td>-d, --diffonly</td><td>Only list differences</td><tr>
-<tr><td>-h, --help</td><td> Print a help message and exit</td><tr>
-<tr><td>-r, --record</td><td>Record mode (record installed RPMs for later)</td><tr>
-<tr><td>-v, --verbose</td><td>Verbose mode</td><tr>
+<tr><td nowrap>-d, --diffonly</td><td>Only list differences</td><tr>
+<tr><td nowrap>-h, --help</td><td> Print a help message and exit</td><tr>
+<tr><td nowrap>-r, --record</td><td>Record mode (record installed RPMs for later)</td><tr>
+<tr><td nowrap>-v, --verbose</td><td>Verbose mode</td><tr>
 </table>
 
 Record Mode Options
 -------------------
 
 <table>
-<tr><td>-f, --force</td><td>Force overwrite of output files</td><tr>
-<tr><td>-o, --output</td><td>Write a list of installed RPMs to this file name. If multiple HOSTs are specified, this specifies a prefix, and the host name will be appended.</td><tr>
+<tr><td nowrap>-f, --force</td><td>Force overwrite of output files</td><tr>
+<tr><td nowrap>-o, --output</td><td>Write a list of installed RPMs to this file name. If multiple HOSTs are specified, this specifies a prefix, and the host name will be appended.</td><tr>
 </table>
 
 SPECIFYING HOSTS
