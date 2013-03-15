@@ -2,31 +2,42 @@ rpmscomp
 ========
 
 NAME
-----
+====
 rpmscomp - compare RPMs installed on multiple systems, or compare versus previously recorded list of installed packages
 
 SYNOPSIS
---------
+========
+
 rpmscomp [OPTION]... [[USER]@HOST]... [FILE]...
+
 rpmscomp --record [OPTION] [[USER]@HOST]...
 
+
 DESCRIPTION
------------
+===========
 Compare the RPMs installed on the specified systems and/or recorded within the
 specified files.
 
-  -h, --help         Print this help message and exit
+General Options
+---------------
 
-  -d, --diffonly     Only list differences
-  -r, --record       Record mode (record installed RPMs for later)
-  -v, --verbose      Verbose mode
+<table>
+<tr><td>-d, --diffonly</td><td>Only list differences</td><tr>
+<tr><td>-h, --help</td><td> Print a help message and exit</td><tr>
+<tr><td>-r, --record</td><td>Record mode (record installed RPMs for later)</td><tr>
+<tr><td>-v, --verbose</td><td>Verbose mode</td><tr>
+</table>
 
-Record mode options:
+Record Mode Options
+-------------------
 
-  -f, --force        Force overwrite of output files
-  -o, --output       Write a list of installed RPMs to this file name. If
-                     multiple HOSTs are specified, this specifies a prefix,
-                     and the host name will be appended.
+<table>
+<tr><td>-f, --force</td><td>Force overwrite of output files</td><tr>
+<tr><td>-o, --output</td><td>Write a list of installed RPMs to this file name. If multiple HOSTs are specified, this specifies a prefix, and the host name will be appended.</td><tr>
+</table>
+
+SPECIFYING HOSTS
+================
 
 If one or more [USER]@HOSTs are specified, rpmcomp will ssh to each of those
 hosts in order to determine what RPMs are installed on that system.
